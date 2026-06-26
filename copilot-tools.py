@@ -17,21 +17,64 @@ Usage:
 
 Categories: browser, file_ops, terminal, vscode, chat, github, memory, other
 """
-import json, os, sys, sqlite3, platform, re
+import json, os, sys, sqlite3, platform, glob, subprocess
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
-# Cross-platform database path
-system = platform.system()
-if system == "Darwin":
-    DB_PATH = os.path.expanduser("~/Library/Application Support/Code/User/globalStorage/state.vscdb")
-elif system == "Linux":
-    DB_PATH = os.path.expanduser("~/.config/Code/User/globalStorage/state.vscdb")
-elif system == "Windows":
-    DB_PATH = os.path.expanduser("~/AppData/Roaming/Code/User/globalStorage/state.vscdb")
-else:
-    print(f"Unsupported OS: {system}")
+
+def get_db_path():
+    """Find VS Code's state.vscdb, handling multiple installs (Code, VSCodium, Cursor, etc.)."""
+    system = platform.system()
+
+    if system == "Darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    elif system == "Linux":
+        base = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+    elif system == "Windows":
+        base = os.path.expanduser(os.environ.get("APPDATA", "~/AppData/Roaming"))
+    else:
+        print(f"Unsupported OS: {system}")
+        sys.exit(1)
+
+    # Try common VS Code app names in order of likelihood
+    app_names = ["Code", "VSCodium", "Cursor", "GitHub Codespaces", "Code - OSS"]
+
+    # First check if VSCODE_PID is set (we're running inside VS Code)
+    vscode_pid = os.environ.get("VSCODE_PID")
+    if vscode_pid:
+        # Try to find the app name from the parent process
+        try:
+            if system == "Darwin":
+                cmd = ["ps", "-o", "comm=", "-p", vscode_pid]
+            else:
+                cmd = ["ps", "-o", "comm=", "-p", vscode_pid]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            parent = result.stdout.strip().lower()
+            if "codium" in parent:
+                app_names = ["VSCodium"] + [a for a in app_names if a != "VSCodium"]
+            elif "cursor" in parent:
+                app_names = ["Cursor"] + [a for a in app_names if a != "Cursor"]
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+    # Search for the database file
+    for app in app_names:
+        db_path = os.path.join(base, app, "User/globalStorage/state.vscdb")
+        if os.path.exists(db_path):
+            return db_path
+
+    # Fallback: search all subdirectories
+    pattern = os.path.join(base, "*/User/globalStorage/state.vscdb")
+    matches = glob.glob(pattern)
+    if matches:
+        return matches[0]
+
+    print(f"Error: Could not find VS Code state.vscdb in {base}")
+    print("Tried app names: {0}".format(", ".join(app_names)))
     sys.exit(1)
+
+
+DB_PATH = get_db_path()
 
 # Category keywords — matched against tool names (order matters, first match wins)
 # Each entry is (category, [keywords]) — keywords are matched as substrings (case-insensitive)
