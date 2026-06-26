@@ -2,6 +2,9 @@
 """
 Copilot Tool Manager - Fast enable/disable of Copilot agent tools.
 
+Dynamically discovers tools from your VS Code database (no hardcoded names).
+Categories are inferred from tool name prefixes/patterns.
+
 Usage:
   ./copilot-tools.py status                    # Show current state
   ./copilot-tools.py disable browser           # Disable browser tools
@@ -10,10 +13,13 @@ Usage:
   ./copilot-tools.py list                      # List all tools with status
   ./copilot-tools.py disable_tool click_element  # Disable a single tool
   ./copilot-tools.py enable_tool click_element   # Enable a single tool
+  ./copilot-tools.py unknown                   # Show uncategorized tools
 
 Categories: browser, file_ops, terminal, vscode, chat, github, memory, other
 """
-import json, os, sys, sqlite3, platform
+import json, os, sys, sqlite3, platform, re
+
+VERSION = "1.1.0"
 
 # Cross-platform database path
 system = platform.system()
@@ -27,16 +33,65 @@ else:
     print(f"Unsupported OS: {system}")
     sys.exit(1)
 
-CATEGORIES = {
-    'browser': ['click_element','drag_element','handle_dialog','hover_element','navigate_page','open_browser_page','read_page','run_playwright_code','screenshot_page','type_in_page'],
-    'file_ops': ['copilot_createDirectory','copilot_createFile','copilot_editFiles','copilot_readFile','copilot_viewImage','copilot_searchCodebase','copilot_findFiles','copilot_listDirectory','copilot_findTextInFiles'],
-    'terminal': ['get_terminal_output','kill_terminal','run_in_terminal','send_to_terminal','terminal_last_command','terminal_selection'],
-    'vscode': ['vscode_renameSymbol','vscode_listCodeUsages','vscode_askQuestions','vscode_searchExtensions_internal','copilot_installExtension','copilot_createNewWorkspace','copilot_runVscodeCommand','copilot_getVSCodeAPI'],
-    'chat': ['runSubagent','execution_subagent','manage_todo_list'],
-    'github': ['copilot_fetchWebPage','copilot_githubRepo','copilot_githubTextSearch'],
-    'memory': ['copilot_memory','copilot_resolveMemoryFileUri'],
-    'other': ['copilot_editNotebook','copilot_getErrors'],
+# Category patterns - matched against tool names (regex)
+CATEGORY_PATTERNS = {
+    'browser': [
+        r'click_element', r'drag_element', r'handle_dialog', r'hover_element',
+        r'navigate_page', r'open_browser', r'read_page', r'run_playwright',
+        r'screenshot', r'type_in_page'
+    ],
+    'file_ops': [
+        r'copilot_create', r'copilot_edit', r'copilot_read', r'copilot_view',
+        r'copilot_search', r'copilot_find', r'copilot_list'
+    ],
+    'terminal': [
+        r'run_in_terminal', r'get_terminal', r'kill_terminal', r'send_to_terminal',
+        r'terminal_last', r'terminal_selection'
+    ],
+    'vscode': [
+        r'vscode_', r'copilot_install', r'copilot_createNew', r'copilot_runVscode',
+        r'copilot_getVSCode', r'copilot_getErrors', r'copilot_getNotebookSummary',
+        r'copilot_runNotebookCell'
+    ],
+    'notebook': [
+        r'configure_notebook', r'configure_python_environment', r'notebook_install',
+        r'notebook_list', r'get_python_environment', r'get_python_executable',
+        r'install_python_packages', r'copilot_runNotebookCell'
+    ],
+    'testing': [
+        r'runTests', r'testFailure', r'run_task', r'get_task_output', r'create_and_run_task'
+    ],
+    'mcp': [
+        r'mcp_provides_tool_'
+    ],
+    'chat': [
+        r'runSubagent', r'execution_subagent', r'manage_todo'
+    ],
+    'github': [
+        r'copilot_fetchWeb', r'copilot_github', r'copilot_githubText'
+    ],
+    'memory': [
+        r'copilot_memory', r'copilot_resolveMemory'
+    ],
 }
+
+def categorize_tool(name):
+    """Dynamically categorize a tool name using pattern matching."""
+    for category, patterns in CATEGORY_PATTERNS.items():
+        for pattern in patterns:
+            if re.search(pattern, name, re.IGNORECASE):
+                return category
+    return 'other'
+
+def discover_categories(data):
+    """Build categories dynamically from actual tools in database."""
+    categories = {}
+    for tool_name, enabled in data['toolEntries']:
+        cat = categorize_tool(tool_name)
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append(tool_name)
+    return categories
 
 def get_data():
     conn = sqlite3.connect(DB_PATH)
@@ -58,28 +113,47 @@ def save_data(data):
     conn.close()
 
 def status(data):
+    categories = discover_categories(data)
     enabled = [k for k,v in data['toolEntries'] if v]
     disabled = [k for k,v in data['toolEntries'] if not v]
+    print(f"Copilot Tool Manager v{VERSION}")
     print(f"Enabled: {len(enabled)}, Disabled: {len(disabled)}, Total: {len(data['toolEntries'])}")
-    # Show by category
-    for cat, tools in CATEGORIES.items():
-        cat_enabled = [t for t in tools if any(t == e[0] and e[1] for e in data['toolEntries'])]
-        cat_disabled = [t for t in tools if any(t == e[0] and not e[1] for e in data['toolEntries'])]
-        if cat_disabled:
-            print(f"  {cat}: {len(cat_enabled)} enabled, {len(cat_disabled)} disabled")
+    print()
+    for cat in sorted(categories.keys()):
+        tools = categories[cat]
+        cat_enabled = sum(1 for t in tools if any(t == e[0] and e[1] for e in data['toolEntries']))
+        cat_disabled = len(tools) - cat_enabled
+        status_icon = "✓" if cat_disabled == 0 else ("✗" if cat_enabled == 0 else "◐")
+        print(f"  {status_icon} {cat}: {cat_enabled}/{len(tools)} enabled")
 
 def toggle(data, action, *args):
+    categories = discover_categories(data)
     tools_to_toggle = []
+    unknown = []
     for arg in args:
-        if arg in CATEGORIES:
-            tools_to_toggle.extend(CATEGORIES[arg])
+        if arg in categories:
+            tools_to_toggle.extend(categories[arg])
+        elif arg in CATEGORY_PATTERNS:
+            tools_to_toggle.extend(categories.get(arg, []))
         else:
-            tools_to_toggle.append(arg)
+            # Try to match as individual tool name
+            found = False
+            for tool_name, _ in data['toolEntries']:
+                if tool_name == arg or re.search(arg, tool_name, re.IGNORECASE):
+                    tools_to_toggle.append(tool_name)
+                    found = True
+            if not found:
+                unknown.append(arg)
+    
+    if unknown:
+        print(f"Warning: Unknown category/tool: {', '.join(unknown)}")
+        print(f"Available categories: {', '.join(sorted(categories.keys()))}")
     
     if not tools_to_toggle:
-        print(f"Unknown category or tool: {args}")
-        print(f"Available categories: {', '.join(CATEGORIES.keys())}")
         return
+    
+    # Deduplicate
+    tools_to_toggle = list(set(tools_to_toggle))
     
     for entry in data['toolEntries']:
         if entry[0] in tools_to_toggle:
@@ -90,12 +164,14 @@ def toggle(data, action, *args):
     disabled = [k for k,v in data['toolEntries'] if not v]
     action_verb = "Enabled" if action == 'enable' else "Disabled"
     print(f"Done. Enabled: {len(enabled)}, Disabled: {len(disabled)}")
-    print(f"  {action_verb}: {', '.join(tools_to_toggle)}")
+    print(f"  {action_verb}: {len(tools_to_toggle)} tools")
 
 def list_tools(data):
-    for cat, tools in CATEGORIES.items():
+    categories = discover_categories(data)
+    for cat in sorted(categories.keys()):
+        tools = categories[cat]
         print(f"\n{cat.upper()}:")
-        for t in tools:
+        for t in sorted(tools):
             for entry in data['toolEntries']:
                 if entry[0] == t:
                     status_str = "✓ enabled" if entry[1] else "✗ disabled"
