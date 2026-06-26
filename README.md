@@ -19,13 +19,13 @@
 
 ```bash
 cd your-project
-git submodule add https://github.com/sushantgop/copilot-tool-manager.git .github/skills/copilot-tool-manager
+git submodule add https://github.com/SushantGautam/copilot-tool-manager.git .github/skills/copilot-tool-manager
 ```
 
 ### Option 2: Manual Install
 
 ```bash
-git clone https://github.com/sushantgop/copilot-tool-manager.git
+git clone https://github.com/SushantGautam/copilot-tool-manager.git
 cp -r copilot-tool-manager ~/.config/Code/User/prompts/skills/
 ```
 
