@@ -60,9 +60,9 @@ python3 copilot-tools.py list                      # List all tools
 
 ## Common Presets
 
-### Thesis/Academic Writing
+### Backend/API Work
 ```bash
-python3 copilot-tools.py disable browser github memory other
+python3 copilot-tools.py disable browser github memory
 ```
 
 ### Web Development
