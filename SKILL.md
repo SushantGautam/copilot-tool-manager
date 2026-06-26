@@ -1,3 +1,11 @@
+---
+name: copilot-tool-manager
+description: >
+  Enable, disable, and manage VS Code Copilot agent tools by category.
+  Optimize your context window by selectively disabling unused tools.
+  Dynamically discovers tools from your VS Code database with pattern-based categorization.
+---
+
 # Copilot Tool Manager
 
 Enable, disable, and manage VS Code Copilot agent tools by category. Optimize your context window by selectively disabling unused tools.
